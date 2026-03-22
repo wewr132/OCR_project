@@ -1,4 +1,5 @@
 pdf2image
 opencv-python
 python-dotenv
-google-generativeai
+google-genai
+pytesseract

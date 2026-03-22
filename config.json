@@ -1,0 +1,44 @@
+{
+  "inbounds": [
+    {
+      "port": 1080,
+      "listen": "127.0.0.1",
+      "protocol": "socks",
+      "settings": {
+        "udp": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "VPS-Bogdan",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "37.46.16.53",
+            "port": 443,
+            "users": [
+              {
+                "id": "c896fd54-2847-4a34-a2e7-034a1ec43cd5",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "fingerprint": "random",
+          "serverName": "www.ya.ru",
+          "publicKey": "sRXqXd4ePVhG4WHJNiPEisPRb0d7gpEdK6bxb5nTUUk",
+          "shortId": "af1da04a5f9134",
+          "spiderX": "/"
+        }
+      }
+    }
+  ]
+}

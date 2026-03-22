@@ -27,6 +27,11 @@ class Config:
         if not cls.GEMINI_API_KEY:
             raise ValueError("Критическая ошибка: GEMINI_API_KEY не найден в .env!")
         
+        proxy = os.getenv("PROXY_URL")
+        if proxy:
+            os.environ['HTTP_PROXY'] = proxy
+            os.environ['HTTPS_PROXY'] = proxy
+            print(f"Включена маршрутизация трафика через прокси: {proxy}")
         # Создаем папки, если их нет
         cls.INPUT_DIR.mkdir(parents=True, exist_ok=True)
         cls.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
