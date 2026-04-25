@@ -20,7 +20,7 @@ class LocalOCR:
         try:
             image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
             
-            text = pytesseract.image_to_string(image, lang='rus', config ='--psm 1').strip()
+            text = pytesseract.image_to_string(image, lang='rus', config ='--psm 6').strip()
             text = text.replace('©', '').replace('— —', '—')
             
             return text
@@ -37,7 +37,7 @@ class LocalOCR:
 if __name__ == "__main__":
     # Тест
     # Передай путь к сгенерированному файлу proc_body_page_1.png
-    test_file = Path('/home/bogdan/OCR_project/data/output/test/raw_body_page_1.png')
+    test_file = Path('/home/bogdan/OCR_project/data/output/test/page_2.png')
     result = LocalOCR.extract_text(test_file)
     print("--- Извлеченный текст ---")
     print(result)
