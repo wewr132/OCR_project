@@ -1,70 +1,82 @@
+# src/preprocessor.py
 import cv2
 import numpy as np
 from pathlib import Path
-from config import Config
+from typing import List
+import logging
 
-class ImagePreprocessor:
+logger = logging.getLogger(__name__)
+
+class DocumentPreprocessor:
     """
-    Класс для подготовки изображений.
-    Логика: валидация -> нарезка сырого массива -> раздельная обработка.
+    Предобработка изображений для Vision LLM.
     """
 
-    @classmethod
-    def _validate_path(cls, path_input: Path | str) -> Path | None:
-        path_obj = Path(path_input)
-        if not path_obj.exists():
-            print(f"Ошибка: Файл не найден {path_obj}")
-            return None
-        return path_obj
+    def __init__(self, output_dir: Path):
+        self.output_dir = output_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    @classmethod
-    def process_document(cls, image_path: Path | str) -> tuple[Path, Path] | None:
-        """
-        Единая точка входа. Нарезает изображение и применяет фильтры
-        целевым образом.
-        """
-        valid_path = cls._validate_path(image_path)
-        if not valid_path: return None
-
-        # 1. Загрузка в Grayscale
-        image = cv2.imread(str(valid_path), cv2.IMREAD_GRAYSCALE)
-        if image is None:
-            print(f"Ошибка чтения: {valid_path.name}")
-            return None
-
-        # 2. Вычисление координат сечения
-        height, width = image.shape[:2]
-        crop_h = int(height * Config.HEADER_HEIGHT)
+    def extract_header(self, src_path: Path, ratio: float = 0.25) -> Path:
+        """Вырезает верхнюю часть изображения (шапку) для извлечения метаданных."""
+        img = cv2.imread(str(src_path), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise ValueError(f"Не удалось прочитать: {src_path}")
+            
+        h, w = img.shape[:2]
+        crop_h = int(h * ratio)
+        header = img[0:crop_h, 0:w]
         
-        # 3. Срезы массива
-        head_img = image[0:crop_h, 0:width]
-        body_img = image[crop_h:height, 0:width]
+        out_path = self.output_dir / f"header_{src_path.name}"
+        cv2.imwrite(str(out_path), header)
+        return out_path
 
-        # 4. Применяем фильтры ТОЛЬКО к шапке (для ИИ)
-        blurred = cv2.GaussianBlur(head_img, (5, 5), 0)
-        head_processed = cv2.adaptiveThreshold(
-            blurred, 255, 
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-            cv2.THRESH_BINARY, 
-            11, 2
-        )
 
-        # 5. Формируем пути
-        head_path = valid_path.parent / f"proc_head_{valid_path.name}"
-        body_path = valid_path.parent / f"raw_body_{valid_path.name}" # raw - сырой
+    def _enhance_for_vlm(self, image: np.ndarray) -> np.ndarray:
+        # 1. Мягкое подавление шума
+        denoised = cv2.fastNlMeansDenoising(image, h=10, templateWindowSize=7, searchWindowSize=21)
         
-        # 6. Сохраняем файлы
-        success_h = cv2.imwrite(str(head_path), head_processed)
-        success_b = cv2.imwrite(str(body_path), body_img)
+        # 2. Локальное улучшение контраста
+        # Делает бледные чернила четче
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(denoised)
+        
+        return enhanced
 
-        if success_h and success_b:
-            return (head_path, body_path)
-        else:
-            print("Ошибка записи на диск.")
-            return None
+    def preprocess_single(self, src_path: Path) -> Path:
+        img = cv2.imread(str(src_path), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise ValueError(f"Не удалось прочитать изображение: {src_path}")
 
-if __name__ == "__main__":
-    test_file = Path('/home/bogdan/OCR_project/data/output/test/page_1.png')
-    result = ImagePreprocessor.process_document(test_file)
-    if result:
-        print(f"Обработка завершена.\nШапка для ИИ: {result[0]}\nТело для Tesseract: {result[1]}")
+        processed = self._enhance_for_vlm(img)
+        
+        out_path = self.output_dir / f"proc_{src_path.name}"
+        if not cv2.imwrite(str(out_path), processed):
+            raise RuntimeError(f"Ошибка сохранения: {out_path}")
+            
+        return out_path
+
+    def preprocess_batch(self, src_paths: List[Path]) -> List[Path]:
+        """Обрабатывает пакет изображений, возвращает список путей к новым файлам."""
+        processed = []
+        for p in src_paths:
+            try:
+                processed.append(self.preprocess_single(p))
+            except Exception as e:
+                logger.warning(f"Пропуск {p.name}: {e}")
+        return processed
+
+    @staticmethod
+    def cleanup(paths: List[Path], strict: bool = False) -> int:
+        """Удаляет временные PNG после успешной записи в БД."""
+        deleted = 0
+        for p in paths:
+            if p.exists():
+                try:
+                    p.unlink()
+                    deleted += 1
+                except Exception as e:
+                    if strict:
+                        logger.error(f"Не удалось удалить {p}: {e}")
+                        raise e
+        logger.info(f"Удалено временных файлов: {deleted}")
+        return deleted

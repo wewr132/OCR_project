@@ -5,3 +5,5 @@ __pycache__/
 data/input/*
 data/output/*
 .env
+*.png
+*.db
