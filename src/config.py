@@ -15,6 +15,8 @@ if not GEMINI_API_KEY:
         "GEMINI_API_KEY=ключ_без_кавычек"
     )
 
+USE_MOCK_API = True
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 INPUT_DIR = BASE_DIR / "data" / "input"
 OUTPUT_DIR = BASE_DIR / "data" / "output"

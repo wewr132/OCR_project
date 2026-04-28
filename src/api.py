@@ -1,133 +1,108 @@
-# src/api.py
-"""
-Модуль взаимодействия с Google Gemini API.
-Поддерживает два режима: извлечение метаданных (JSON) и тела документа (текст).
-"""
-
-import os
+import base64
 import json
+import requests
 from pathlib import Path
-from typing import Optional
-import google.generativeai as genai
-from google.generativeai.types import GenerationConfig
+from config import Config
 
-class GeminiClient:
-    """Клиент для работы с мультимодальной моделью Gemini 2.0 Flash."""
-    
-    def __init__(self, api_key: str, model_name: str = "gemini-1.5-flash"):
-        """Инициализация клиента."""
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name)
-    
+class YandexVLMClient:
+    """
+    Адаптер для взаимодействия с Yandex Cloud Foundation Models.
+    Поддерживает мультимодальные модели (Vision).
+    """
+    def __init__(self):
+        # Используем API-ключ сервисного аккаунта для долгосрочной работы без ротации IAM-токенов
+        self.api_key = Config.YANDEX_API_KEY
+        self.folder_id = Config.YANDEX_FOLDER_ID
+        self.model_uri = f"vis://{self.folder_id}/qwen-3.5-35b-vision/latest" 
+        self.headers = {
+            "Authorization": f"Api-Key {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        self.endpoint = "https://llm.api.cloud.yandex.net/foundationModels/v1/chat"
+
+    def _encode_image(self, image_path: Path) -> str:
+        """Кодирует изображение в Base64 для передачи в JSON."""
+        with open(image_path, "rb") as image_file:
+            encoded = base64.b64encode(image_file.read()).decode('utf-8')
+            return encoded
+
     def _get_header_prompt(self) -> str:
-        """Системный промпт для извлечения метаданных из шапки документа."""
-        return """Ты — помощник для извлечения метаданных из официальных документов РФ.
-На изображении — верхняя часть документа (шапка). Твоя задача:
-1. Найти и извлечь НОМЕР документа (формат: цифры, возможно с буквами/дефисами, например: "123-п", "№ 45/2025").
-2. Найти и извлечь ДАТУ документа (привести к формату ГГГГ-ММ-ДД, если возможно).
-3. Определить ТИП документа (например: "Приказ", "Распоряжение", "Письмо").
-4. Извлечь НАИМЕНОВАНИЕ организации-отправителя, если оно есть.
-
-Требования к ответу:
-- Верни ТОЛЬКО валидный JSON без дополнительных пояснений.
-- Используй ключи: "doc_number", "doc_date", "doc_type", "issuer".
-- Если поле не найдено — укажи null.
-- Не выдумывай значения. Если текст неразборчив — лучше null.
-
-Пример ответа:
-{
-  "doc_number": "123-п",
-  "doc_date": "2025-09-01",
-  "doc_type": "Приказ",
-  "issuer": "Арбитражный суд Республики Карелия"
-}"""
+        return """
+        Ты — автоматизированная система извлечения метаданных из официальных приказов.
+        Твоя задача: найти дату приказа и его регистрационный номер.
+        Особое внимание обращай на рукописные символы.
+        Верни результат СТРОГО в формате JSON без markdown-разметки:
+        {"date": "найденная дата", "number": "найденный номер"}
+        Если данные не найдены, верни null. Не пиши ничего, кроме JSON.
+        """
 
     def _get_body_prompt(self) -> str:
-        """Системный промпт для извлечения основного текста документа."""
-        return """Ты — система оцифровки официальных документов. Твоя задача:
-1. Перепиши ВЕСЬ печатный текст с изображения, сохраняя структуру абзацев и нумерацию пунктов.
-2. Игнорируй рукописные подписи в конце документа. Если видишь подпись — оставь маркер [ПОДПИСЬ] и не пытайся её расшифровать.
-3. Игнорируй печати, штампы, водяные знаки и другие графические элементы.
-4. Если встречаются неразборчивые фрагменты печатного текста — оставь [?] на их месте.
-5. Не добавляй комментариев, пояснений или форматирования вне текста документа.
-
-Важно: возвращай только чистый текст документа, без markdown, без кавычек, без преамбул."""
-
-    def extract_metadata(self, image_path: Path) -> Optional[dict]:
+        return """
+        Ты — система оцифровки официальных документов. Перепиши весь печатный текст с предоставленного изображения. 
+        Соблюдай следующие жесткие правила:
+        1. Игнорируй любые рукописные подписи в конце документа.
+        2. Игнорируй круглые печати и угловые штампы.
+        3. Сохраняй исходное разбиение на абзацы.
+        4. Не добавляй от себя никаких комментариев.
         """
-        Извлекает метаданные из изображения шапки документа.
-        Возвращает словарь или None при ошибке.
-        """
-        if isinstance(image_path, str):
-            image_path = Path(image_path)
-        
+
+    def _send_request(self, image_path: Path, prompt: str) -> str | None:
+        """Формирует payload и выполняет POST-запрос к API."""
         if not image_path.exists():
-            print(f"Ошибка: файл не найден {image_path}")
+            print(f"Ошибка: файл {image_path} не найден.")
             return None
-        
-        try:
-            # Загружаем изображение
-            image = genai.upload_file(str(image_path))
-            
-            # Генерируем ответ с требованием JSON
-            response = self.model.generate_content(
-                contents=[self._get_header_prompt(), image],
-                generation_config=GenerationConfig(
-                    response_mime_type="application/json",
-                    temperature=0.1,  # Минимальная креативность для точности
-                )
-            )
-            
-            # Парсим JSON
-            result = json.loads(response.text.strip())
-            return result
-            
-        except json.JSONDecodeError as e:
-            print(f"Ошибка парсинга JSON от API: {e}")
-            print(f"Полученный ответ: {response.text[:200]}...")
-            return None
-        except Exception as e:
-            print(f"Ошибка при извлечении метаданных: {e}")
-            return None
-        finally:
-            # Освобождаем ресурс, если используется временная загрузка
-            if 'image' in locals():
-                try:
-                    image.delete()
-                except:
-                    pass
 
-    def extract_body_text(self, image_path: Path) -> Optional[str]:
-        """
-        Извлекает основной текст из изображения тела документа.
-        Возвращает строку или None при ошибке.
-        """
-        if isinstance(image_path, str):
-            image_path = Path(image_path)
+        base64_img = self._encode_image(image_path)
         
-        if not image_path.exists():
-            print(f"Ошибка: файл не найден {image_path}")
-            return None
-        
+        payload = {
+            "modelUri": self.model_uri,
+            "messages": [
+                {
+                    "role": "system",
+                    "text": prompt
+                },
+                {
+                    "role": "user",
+                    "text": "Обработай это изображение согласно инструкциям.",
+                    "image": base64_img
+                }
+            ],
+            "completionOptions": {
+                "stream": False,
+                "temperature": 0.1, # Низкая температура для воображения модели
+                "maxTokens": 2000
+            }
+        }
+
         try:
-            image = genai.upload_file(str(image_path))
-            
-            # Генерируем ответ в текстовом формате (без JSON)
-            response = self.model.generate_content(
-                contents=[self._get_body_prompt(), image],
-                generation_config=GenerationConfig(
-                    temperature=0.2,  # Чуть выше для естественности текста
-                )
-            )
-            
-            return response.text.strip()
-            
+            response = requests.post(self.endpoint, headers=self.headers, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            return result['result']['alternatives'][0]['message']['text']
         except Exception as e:
-            print(f"Ошибка при извлечении текста тела: {e}")
+            print(f"Ошибка обращения к API Yandex: {e}")
             return None
-        finally:
-            if 'image' in locals():
-                try:
-                    image.delete()
-                except:
-                    pass
+
+    def extract_metadata(self, image_path: Path) -> dict | None:
+        """Извлечение шапки. Возвращает словарь."""
+        if Config.USE_MOCK_API:
+            return {"date": "01.09.2025", "number": "141-П"}
+
+        raw_response = self._send_request(image_path, self._get_header_prompt())
+        if not raw_response:
+            return None
+            
+        try:
+            # Очистка возможных артефактов модели перед парсингом
+            clean_text = raw_response.replace('```json', '').replace('```', '').strip()
+            return json.loads(clean_text)
+        except json.JSONDecodeError:
+            print(f"Ошибка парсинга JSON. Сырой ответ: {raw_response}")
+            return None
+
+    def extract_body_text(self, image_path: Path) -> str | None:
+        """Извлечение текста тела документа. Возвращает строку."""
+        if Config.USE_MOCK_API:
+            return "Тестовый текст тела документа из Mock-режима."
+
+        return self._send_request(image_path, self._get_body_prompt())
