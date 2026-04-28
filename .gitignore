@@ -7,3 +7,4 @@ data/output/*
 .env
 *.png
 *.db
+forfoto.py

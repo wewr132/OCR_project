@@ -6,15 +6,16 @@
 """
 
 import sys
+import hashlib
 from pathlib import Path
 
 # Добавляем src в путь, чтобы работали импорты
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import GEMINI_API_KEY, PROCESSED_DIR
+from config import PROCESSED_DIR
 from converter import PDFConverter
 from preprocessor import DocumentPreprocessor
-from api import GeminiClient
+from api import YandexVLMClient
 from db_manager import DatabaseManager
 
 
@@ -22,7 +23,7 @@ def process_document(pdf_path: str) -> int | None:
     """Полный пайплайн обработки документа"""
     
     # 1. Инициализация
-    gemini = GeminiClient(api_key=GEMINI_API_KEY)
+    ai_client = YandexVLMClient()
     db = DatabaseManager()
     preprocessor = DocumentPreprocessor(output_dir=PROCESSED_DIR)
     
@@ -42,7 +43,7 @@ def process_document(pdf_path: str) -> int | None:
     header_path = preprocessor.extract_header(first_page)
     
     print("🤖 Распознавание шапки...")
-    metadata = gemini.extract_metadata(header_path)
+    metadata = ai_client.extract_metadata(header_path)
     if metadata:
         print(f"✅ Найдено: {metadata.get('doc_type')} №{metadata.get('doc_number')} от {metadata.get('doc_date')}")
     
@@ -50,7 +51,7 @@ def process_document(pdf_path: str) -> int | None:
     print("🤖 Распознавание тела документа...")
     body_parts = []
     for img_path in enhanced_images:
-        text = gemini.extract_body_text(img_path)
+        text = ai_client.extract_body_text(img_path)
         if text:
             body_parts.append(text)
     body_text = "\n\n".join(body_parts)

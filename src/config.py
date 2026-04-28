@@ -7,15 +7,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # === 2. Глобальные переменные (доступны напрямую) ===
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
+YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
+YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
+USE_MOCK_API = os.getenv("USE_MOCK_API")
+
+
+if not YANDEX_API_KEY:
     raise RuntimeError(
-        "Ошибка конфигурации: GEMINI_API_KEY не найден!\n"
+        "Ошибка конфигурации: GEMINI_AP I_KEY не найден!\n"
         "Убедись, что в корне проекта есть файл .env с строкой:\n"
-        "GEMINI_API_KEY=ключ_без_кавычек"
+        "YANDEX_API_KEY=ключ_без_кавычек"
     )
 
-USE_MOCK_API = True
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 INPUT_DIR = BASE_DIR / "data" / "input"
@@ -28,7 +31,9 @@ class Config:
     """Контейнер для настроек приложения. Дублирует глобальные переменные для удобного доступа."""
     
     # API
-    GEMINI_API_KEY = GEMINI_API_KEY  # <-- Дублируем, чтобы работало cls.GEMINI_API_KEY
+    YANDEX_FOLDER_ID = YANDEX_FOLDER_ID
+    YANDEX_API_KEY = YANDEX_API_KEY
+    USE_MOCK_API = USE_MOCK_API
     MODEL_NAME = "gemini-1.5-flash-8b"
     PROXY_URL = os.getenv("PROXY_URL", "http://127.0.0.1:10809")
     
@@ -44,8 +49,8 @@ class Config:
     @classmethod
     def validate(cls):
         """Проверка конфигурации и создание папок."""
-        if not cls.GEMINI_API_KEY:
-            raise ValueError("Критическая ошибка: GEMINI_API_KEY не найден!")
+        if not cls.YANDEX_API_KEY:
+            raise ValueError("Критическая ошибка: YANDEX_API_KEY не найден!")
         
         # Настройка прокси
         if cls.PROXY_URL:
@@ -68,7 +73,7 @@ if __name__ == "__main__":
     try:
         # 1. Проверка глобальных переменных
         print(" Глобальные переменные:")
-        print(f"   GEMINI_API_KEY: {GEMINI_API_KEY[:10] + '...' if GEMINI_API_KEY else 'ПУСТО'}")
+        print(f"   YANDEX_API_KEY: {YANDEX_API_KEY[:10] + '...' if YANDEX_API_KEY else 'ПУСТО'}")
         print(f"   BASE_DIR: {BASE_DIR}")
         
         # 2. Проверка класса Config
