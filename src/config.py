@@ -9,15 +9,11 @@ load_dotenv()
 # === 2. Глобальные переменные (доступны напрямую) ===
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
-USE_MOCK_API = os.getenv("USE_MOCK_API")
+USE_MOCK_API = False
 
 
-if not YANDEX_API_KEY:
-    raise RuntimeError(
-        "Ошибка конфигурации: GEMINI_AP I_KEY не найден!\n"
-        "Убедись, что в корне проекта есть файл .env с строкой:\n"
-        "YANDEX_API_KEY=ключ_без_кавычек"
-    )
+if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
+    raise RuntimeError("Ошибка: YANDEX_API_KEY или YANDEX_FOLDER_ID не найдены в .env!")
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -34,8 +30,8 @@ class Config:
     YANDEX_FOLDER_ID = YANDEX_FOLDER_ID
     YANDEX_API_KEY = YANDEX_API_KEY
     USE_MOCK_API = USE_MOCK_API
-    MODEL_NAME = "gemini-1.5-flash-8b"
-    PROXY_URL = os.getenv("PROXY_URL", "http://127.0.0.1:10809")
+    MODEL_NAME = "null"
+    # PROXY_URL = os.getenv("PROXY_URL", "http://127.0.0.1:10809")
     
     # Обработка изображений
     DPI = 300
@@ -53,10 +49,10 @@ class Config:
             raise ValueError("Критическая ошибка: YANDEX_API_KEY не найден!")
         
         # Настройка прокси
-        if cls.PROXY_URL:
-            os.environ['HTTP_PROXY'] = cls.PROXY_URL
-            os.environ['HTTPS_PROXY'] = cls.PROXY_URL
-            print(f"Прокси: {cls.PROXY_URL}")
+        # if cls.PROXY_URL:
+        #     os.environ['HTTP_PROXY'] = cls.PROXY_URL
+        #     os.environ['HTTPS_PROXY'] = cls.PROXY_URL
+        #     print(f"Прокси: {cls.PROXY_URL}")
         
         # Создание папок
         for dir_path in [cls.INPUT_DIR, cls.OUTPUT_DIR, cls.PROCESSED_DIR]:

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import PROCESSED_DIR
 from converter import PDFConverter
 from preprocessor import DocumentPreprocessor
-from api import YandexVLMClient
+from api import YandexClient
 from db_manager import DatabaseManager
 
 
@@ -23,7 +23,7 @@ def process_document(pdf_path: str) -> int | None:
     """Полный пайплайн обработки документа"""
     
     # 1. Инициализация
-    ai_client = YandexVLMClient()
+    ai_client = YandexClient()
     db = DatabaseManager()
     preprocessor = DocumentPreprocessor(output_dir=PROCESSED_DIR)
     
@@ -39,11 +39,16 @@ def process_document(pdf_path: str) -> int | None:
     enhanced_images = preprocessor.preprocess_batch(raw_images)
     
     # 4. Извлечение метаданных (ТОЛЬКО из шапки первой страницы)
-    first_page = enhanced_images[0]
-    header_path = preprocessor.extract_header(first_page)
+    header_image_path = preprocessor.extract_header(enhanced_images[0])
+    raw_header_text = ai_client.extract_header_raw_text(header_image_path)
+
+    if raw_header_text:
+        # 2. Передаем извлеченный СТРОКОВЫЙ текст в LLM для парсинга
+        metadata = ai_client.extract_metadata(raw_header_text)
+    else:
+        metadata = None
     
     print("🤖 Распознавание шапки...")
-    metadata = ai_client.extract_metadata(header_path)
     if metadata:
         print(f"✅ Найдено: {metadata.get('doc_type')} №{metadata.get('doc_number')} от {metadata.get('doc_date')}")
     
@@ -51,7 +56,15 @@ def process_document(pdf_path: str) -> int | None:
     print("🤖 Распознавание тела документа...")
     body_parts = []
     for img_path in enhanced_images:
-        text = ai_client.extract_body_text(img_path)
+        if img_path == "page_1.png":
+            img = cv2.imread(str(img_path))
+            image_height = img.shape[0]
+
+            crop_threshold = int(image_height * 0.25) 
+            # 3. Передаем порог в метод API
+            text = ai_client.extract_body_text(img_path, crop_y_threshold=crop_threshold)
+        else:
+            text = ai_client.extract_body_text(img_path)
         if text:
             body_parts.append(text)
     body_text = "\n\n".join(body_parts)
@@ -70,9 +83,9 @@ def process_document(pdf_path: str) -> int | None:
     print(f"💾 Сохранено в БД с ID={doc_id}")
     
     # 7. 🗑️ ОЧИСТКА: удаляем временные файлы только после успешной записи
-    files_to_remove = enhanced_images + [header_path]
+    files_to_remove = enhanced_images + [header_image_path]
     DocumentPreprocessor.cleanup(files_to_remove)
-    
+    db.close()
     return doc_id
 
 

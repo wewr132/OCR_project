@@ -13,6 +13,8 @@ class DatabaseManager:
     
     def __init__(self, db_path: str = "documents.db"):
         self.db_path = db_path
+        self.conn = sqlite3.connect(self.db_path)
+        self.conn.execute("PRAGMA foreign_keys = ON;")  # Включаем FK
         self._init_tables()
     
     def _init_tables(self):
@@ -40,7 +42,7 @@ class DatabaseManager:
                     doc_type TEXT,
                     issuer TEXT,
                     raw_json TEXT,
-                    FOREIGN KEY (doc_id) REFERENCES documents(id)
+                    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
                 )
             """)
             
@@ -51,7 +53,7 @@ class DatabaseManager:
                     full_text TEXT,
                     page_count INTEGER,
                     extraction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (doc_id) REFERENCES documents(id)
+                    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
                 )
             """)
             
@@ -112,3 +114,6 @@ class DatabaseManager:
             """, (doc_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
+    def close(self):
+        if self.conn:
+            self.conn.close()
