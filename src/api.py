@@ -18,89 +18,106 @@ class YandexClient:
         self.folder_id = getattr(Config, 'YANDEX_FOLDER_ID', 'dummy_folder_id')
         self.api_key = getattr(Config, 'YANDEX_API_KEY', 'dummy_api_key')
         
+        # Единый правильный HTTP-заголовок для статических API-ключей.
+        # Схема Api-Key строго исключает использование заголовка x-folder-id.
         self.headers = {
             "Authorization": f"Api-Key {self.api_key}",
             "Content-Type": "application/json"
         }
         
-        # Эндпоинты Яндекса (теперь используем текстовый GPT вместо Vision)
+        # Эндпоинты Яндекса
         self.ocr_url = "https://vision.api.cloud.yandex.net/vision/v1/batchAnalyze"
         self.gpt_url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
         self.ocr_recognize_url = "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText"
+
     def _encode_image(self, image_path: Path) -> str:
         """Кодирует изображение в Base64."""
         with open(image_path, "rb") as f:
             return base64.b64encode(f.read()).decode('utf-8')
 
     def _retry_request(self, func, max_retries=3):
-        """Экспоненциальная задержка при лимитах (429 ошибка)."""
+        """Экспоненциальная задержка при лимитах с логированием HTTP-ошибок."""
         for i in range(max_retries):
             try:
                 return func()
             except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 429:
+                status = e.response.status_code
+                if status == 429:
                     wait = (2 ** i) * 5
-                    print(f"Лимит Yandex API. Жду {wait}с...")
+                    print(f"⚠️ Лимит Yandex API (429). Жду {wait}с...")
                     time.sleep(wait)
                 else:
-                    print(f"Ошибка HTTP: {e.response.text}")
+                    print(f"❌ Ошибка HTTP {status}: {e.response.text}")
                     raise
+            except requests.exceptions.RequestException as e:
+                print(f"❌ Ошибка сети: {e}")
+                raise
         return None
 
     # --- ШАГ 1: ЧТЕНИЕ ПОЧЕРКА ИЗ ШАПКИ ---
     def extract_header_raw_text(self, image_path: Path) -> Optional[str]:
-        """Извлекает сырой текст из обрезанной шапки (модель handwritten)."""
+        """Извлекает сырой текст из обрезанной шапки (модель handwritten через новый API)."""
         if getattr(Config, 'USE_MOCK_API', False):
             print("🤖 [MOCK] Yandex Vision OCR: Возврат сырого текста шапки")
             return "Приказ № 141-П от 2025-09-01 Арбитражный суд"
 
         img_b64 = self._encode_image(image_path)
+        
+        # Плоская структура JSON согласно спецификации recognizeText
         payload = {
-            "mimeType": "JPEG",
+            "mimeType": "PNG",
             "languageCodes": ["ru"],
             "model": "handwritten",
             "content": img_b64
         }
-        local_headers = self.headers.copy()
-        local_headers["x-folder-id"] = self.folder_id
 
         def _call():
-            resp = requests.post(self.ocr_recognize_url, headers=self.local_headers, json=payload)
+            # Используем корректный единый заголовок self.headers
+            resp = requests.post(self.ocr_recognize_url, headers=self.headers, json=payload)
             resp.raise_for_status()
             return resp.json()
 
         try:
             result = self._retry_request(_call)
-            if not result: return None
-            
-            # Безопасная навигация по дереву
-            inner_results = result.get('results', [{}])[0].get('results', [{}])[0]
-            
-            # Если Яндекс отказался обрабатывать картинку, он пришлет узел 'error'
-            if 'error' in inner_results:
-                print(f"Яндекс вернул ошибку для 'handwritten': {inner_results['error']}")
+            if not result: 
                 return None
             
-            words = []
-            pages = result.get('result', {}).get('textAnnotation', {}).get('pages', [])
-            for page in pages:
-                for block in page.get('blocks', []):
-                    for line in block.get('lines', []):
-                        for word in line.get('words', []):
-                            words.append(word.get('text', ''))
-            return " ".join(words).strip()
+            # Десериализация графа: поиск textAnnotation
+            text_annotation = result.get('textAnnotation') or result.get('result', {}).get('textAnnotation', {})
+            
+            if not text_annotation:
+                print(f"⚠️ [DEBUG] Структура 'textAnnotation' не найдена. Ответ API: {json.dumps(result, ensure_ascii=False)}")
+                return None
+
+            extracted_lines = []
+            blocks = text_annotation.get('blocks', [])
+            
+            for block in blocks:
+                for line in block.get('lines', []):
+                    # Прямое извлечение текста на уровне строки
+                    line_text = line.get('text', '').strip()
+                    if line_text:
+                        extracted_lines.append(line_text)
+                    else:
+                        # Резервный обход лексем
+                        words = [w.get('text', '') for w in line.get('words', [])]
+                        if words:
+                            extracted_lines.append(" ".join(words).strip())
+                            
+            final_text = " ".join(extracted_lines).strip()
+            if not final_text:
+                print(f"⚠️ [DEBUG] Текст распознан как пустой. Ответ API: {json.dumps(result, ensure_ascii=False)}")
+                return None
+                
+            return final_text
             
         except Exception as e:
-            print(f"❌ Ошибка извлечения сырого текста шапки: {e}")
-            # Дебаг: смотрим, что реально пришло от Яндекса
-            if 'result' in locals():
-                print(f"Сырой ответ Яндекса: {json.dumps(result, ensure_ascii=False)}")
+            print(f"❌ Сбой в extract_header_raw_text: {e}")
             return None
 
-    # --- ШАГ 2: ПАРСИНГ ТЕКСТА ШАПКИ (БЫВШИЙ VLM) ---
+    # --- ШАГ 2: ПАРСИНГ ТЕКСТА ШАПКИ (YANDEX GPT) ---
     def extract_metadata(self, clean_header_text: str) -> Optional[dict]:
-        """Извлекает метаданные из ТЕКСТА через текстовый YandexGPT."""
-        
+        """Извлекает метаданные из текста через YandexGPT."""
         if getattr(Config, 'USE_MOCK_API', False):
             print("🤖 [MOCK] YandexGPT: Возврат фейковых метаданных")
             return {"doc_number": "141-П", "doc_date": "2025-09-01", "doc_type": "Приказ", "issuer": "Арбитражный суд"}
@@ -121,12 +138,12 @@ class YandexClient:
             "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
             "completionOptions": {
                 "stream": False, 
-                "temperature": 0.0, # 0.0 для точности
+                "temperature": 0.0,
                 "maxTokens": 1000
             },
             "messages": [
                 {"role": "system", "text": prompt},
-                {"role": "user", "text": clean_header_text} # Передаем текст, а не картинку
+                {"role": "user", "text": clean_header_text}
             ]
         }
 
@@ -137,20 +154,20 @@ class YandexClient:
 
         try:
             result = self._retry_request(_call)
-            if not result: return None
+            if not result: 
+                return None
             
             text = result["result"]["alternatives"][0]["message"]["text"]
             clean_text = text.replace("```json", "").replace("```", "").strip()
             return json.loads(clean_text)
             
         except Exception as e:
-            print(f"Ошибка YandexGPT (метаданные): {e}")
+            print(f"❌ Ошибка YandexGPT (метаданные): {e}")
             return None
 
     # --- ШАГ 3: ЧТЕНИЕ ТЕЛА С ФИЛЬТРАЦИЕЙ ---
     def extract_body_text(self, image_path: Path, crop_y_threshold: int = 0) -> Optional[str]:
         """Извлекает основной текст, отсекая мусор из шапки по координатам."""
-        
         if getattr(Config, 'USE_MOCK_API', False):
             print("[MOCK] Yandex Vision OCR: Возврат фейкового текста тела")
             return "Тестовый текст тела документа.\nСидоров Ю.В. назначен ответственным.\nПодпись."
@@ -178,7 +195,8 @@ class YandexClient:
 
         try:
             result = self._retry_request(_call)
-            if not result: return None
+            if not result: 
+                return None
             
             body_lines = []
             try:
@@ -187,16 +205,15 @@ class YandexClient:
                     for block in page.get('blocks', []):
                         for line in block.get('lines', []):
                             words = line.get('words', [])
-                            if not words: continue
+                            if not words: 
+                                continue
                             
-                            # Расчет Y-координаты для фильтрации
                             try:
                                 y_coords = [int(float(w['boundingBox']['vertices'][0].get('y', 0))) for w in words]
                                 avg_y = sum(y_coords) / len(y_coords)
                             except (KeyError, IndexError):
                                 continue
 
-                            # Игнорируем строки, которые находятся выше линии среза шапки
                             if avg_y >= crop_y_threshold:
                                 line_text = " ".join([w.get('text', '') for w in words])
                                 if line_text.strip():
@@ -204,9 +221,9 @@ class YandexClient:
                                     
                 return "\n".join(body_lines)
             except (KeyError, IndexError):
-                print("Текст на изображении не найден.")
+                print("⚠️ Текст на изображении не найден или структура ответа пуста.")
                 return None
                 
         except Exception as e:
-            print(f"Ошибка Yandex Vision (текст): {e}")
+            print(f"❌ Ошибка Yandex Vision (текст тела): {e}")
             return None
