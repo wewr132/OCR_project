@@ -26,10 +26,16 @@ class DocumentPreprocessor:
         crop_h = int(h * ratio)
         header = img[0:crop_h, 0:w]
         
-        out_path = self.output_dir / f"header_{src_path.name}"
-        cv2.imwrite(str(out_path), header)
-        return out_path
+        binary = cv2.adaptiveThreshold(
+            header, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY, 11, 2
+        )
 
+        # 3. Сохранение в JPEG (как мы и договорились)
+        header_path = self.output_dir /  f"header_{src_path.name}"
+        cv2.imwrite(str(header_path), binary, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        
+        return header_path
 
     def _enhance_for_vlm(self, image: np.ndarray) -> np.ndarray:
         # 1. Мягкое подавление шума
@@ -67,7 +73,7 @@ class DocumentPreprocessor:
 
     @staticmethod
     def cleanup(paths: List[Path], strict: bool = False) -> int:
-        """Удаляет временные PNG после успешной записи в БД."""
+        """Удаляет временные JPEG после успешной записи в БД."""
         deleted = 0
         for p in paths:
             if p.exists():

@@ -102,13 +102,51 @@ def process_document(pdf_path: str) -> int | None:
 
 
 if __name__ == "__main__":
+    # Простой CLI: python main.py <путь_к_папке_или_файлу>
     if len(sys.argv) < 2:
-        print("Использование: python main.py <path_to_pdf>")
+        print("Использование: python main.py <путь_к_папке_или_pdf_файлу>")
         sys.exit(1)
     
-    pdf_file = sys.argv[1]
-    if not Path(pdf_file).exists():
-        print(f"❌ Файл не найден: {pdf_file}")
-        sys.exit(1)
+    input_target = Path(sys.argv[1])
     
-    process_document(pdf_file)
+    # Проверка существования пути
+    if not input_target.exists():
+        print(f"❌ Путь не найден: {input_target}")
+        sys.exit(1)
+        
+    pdf_files = []
+    
+    # Сценарий 1: Передан конкретный файл
+    if input_target.is_file():
+        if input_target.suffix.lower() == '.pdf':
+            pdf_files.append(input_target)
+        else:
+            print(f"❌ Ошибка: Файл {input_target.name} не является PDF.")
+            sys.exit(1)
+            
+    # Сценарий 2: Передана папка
+    elif input_target.is_dir():
+        pdf_files = list(input_target.glob("*.pdf")) + list(input_target.glob("*.PDF"))
+        if not pdf_files:
+            print(f"⚠️ В папке {input_target} не найдено PDF-файлов.")
+            sys.exit(0)
+            
+    print(f"📂 Найдено PDF-файлов для обработки: {len(pdf_files)}")
+    print("-" * 40)
+    
+    # Итеративный запуск конвейера
+    success_count = 0
+    for i, pdf_path in enumerate(pdf_files, start=1):
+        print(f"\n🔄 [Файл {i}/{len(pdf_files)}] Запуск пайплайна для: {pdf_path.name}")
+        
+        # Передаем абсолютный путь в строковом формате
+        doc_id = process_document(str(pdf_path.resolve()))
+        
+        if doc_id:
+            success_count += 1
+            print(f"✅ Успешно завершено. ID в базе: {doc_id}")
+        else:
+            print(f"❌ Ошибка обработки файла: {pdf_path.name}")
+            
+    print("-" * 40)
+    print(f"🏁 Обработка завершена. Успешно: {success_count}/{len(pdf_files)}")

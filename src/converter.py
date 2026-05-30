@@ -20,10 +20,10 @@ class PDFConverter:
             images = convert_from_path(pdf_path, dpi=Config.DPI)
             for i, image in enumerate(images):
                 # даём имя странице и пишем ее путь
-                image_name = f'page_{i+1}.png'
+                image_name = f'page_{i+1}.jpg'
                 full_image_path = output_subdir / image_name
                 # сохраняем объект по пути
-                image.save(full_image_path, "PNG")
+                image.save(full_image_path, "JPEG")
                 image_path.append(full_image_path)
                 print(f'Coхранено: {full_image_path.name}')
             return image_path

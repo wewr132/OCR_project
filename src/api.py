@@ -65,7 +65,7 @@ class YandexClient:
         
         # Плоская структура JSON согласно спецификации recognizeText
         payload = {
-            "mimeType": "PNG",
+            "mimeType": "JPEG",
             "languageCodes": ["ru"],
             "model": "handwritten",
             "content": img_b64
@@ -221,9 +221,9 @@ class YandexClient:
                                     
                 return "\n".join(body_lines)
             except (KeyError, IndexError):
-                print("⚠️ Текст на изображении не найден или структура ответа пуста.")
+                print("Текст на изображении не найден или структура ответа пуста.")
                 return None
                 
         except Exception as e:
-            print(f"❌ Ошибка Yandex Vision (текст тела): {e}")
+            print(f"Ошибка Yandex Vision (текст тела): {e}")
             return None
